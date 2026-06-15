@@ -1,0 +1,7 @@
+discordSettings.doNotUpload.json
+venv/
+__pycache__/
+*.pyc
+*.log
+pyvenv.cfg
+*.tar.gz

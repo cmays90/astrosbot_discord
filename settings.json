@@ -1,0 +1,4 @@
+{
+    "DB_FILE": "BaseballConsumer/logs/game_events.db",
+    "TEAM_ID": 117
+}
