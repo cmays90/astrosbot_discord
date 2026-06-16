@@ -524,7 +524,7 @@ class BaseballUpdaterBotV2:
                 end_of_inning_string = "{}\n{}".format(end_of_inning_string, constants.SEVENTH_INNING_STRETCH)
             pitcher_count = info.get('pitcherCount')
             if pitcher_count:
-                end_of_inning_string = "{}\n{}".format(
+                end_of_inning_string = "{}\n```{}```".format(
                     end_of_inning_string, format_pitch_count_line(*pitcher_count))
             return end_of_inning_string
         return ""
