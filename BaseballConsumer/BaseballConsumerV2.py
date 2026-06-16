@@ -520,12 +520,12 @@ class BaseballUpdaterBotV2:
             end_of_inning_string = "```------ End of {} ------\n{}\n------ End of {} ------\n\nCurrent delay set to " \
                                    "{} seconds.```".format(
                 self.formatInning(info), info['fullLinescoreString'], self.formatInning(info), constants.DELAY)
-            if info['inning'] == "7" and info['inningHalf'].upper()[0:3] == "TOP":
-                end_of_inning_string = "{}\n{}".format(end_of_inning_string, constants.SEVENTH_INNING_STRETCH)
             pitcher_count = info.get('pitcherCount')
             if pitcher_count:
                 end_of_inning_string = "{}\n```{}```".format(
                     end_of_inning_string, format_pitch_count_line(*pitcher_count))
+            if info['inning'] == "7" and info['inningHalf'].upper()[0:3] == "TOP":
+                end_of_inning_string = "{}\n{}".format(end_of_inning_string, constants.SEVENTH_INNING_STRETCH)
             return end_of_inning_string
         return ""
 

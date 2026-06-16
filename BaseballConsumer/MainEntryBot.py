@@ -389,7 +389,7 @@ class BaseballCog(commands.Cog):
                 continue
             abbv = boxscore.get('teams', {}).get(side, {}).get('team', {}).get('abbreviation', '')
             line = format_pitch_count_line(*count)
-            lines.append("{} {}".format(abbv, line) if abbv else line)
+            lines.append("{}: {}".format(abbv, line) if abbv else line)
         if not lines:
             await ctx.reply("No active pitchers right now.")
             return
