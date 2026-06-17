@@ -1,4 +1,5 @@
 {
-    "DB_FILE": "BaseballConsumer/logs/game_events.db",
-    "TEAM_ID": 117
+  "DB_FILE": "BaseballConsumer/logs/game_events.db",
+  "TEAM_ID": 117,
+  "WIN_MESSAGES": ["https://www.youtube.com/watch?v=JvSXJ4_g228"]
 }

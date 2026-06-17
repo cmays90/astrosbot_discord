@@ -41,7 +41,9 @@ POSTPONED_DESCRIPTION = "WHAT DID YOU DO? I don't deserve to not watch baseball.
 POSTPONED_BODY = ""
 
 GAMEOVER_TITLE = "And that's the game"
-GAMEOVER_DESCRIPTION = "Everyone is a winner in my book"
+GAMEOVER_DESCRIPTION = (
+    "Baseball was played. A winner was declared. The sun will rise tomorrow."
+)
 GAMEOVER_BODY = ""
 
 FINAL_TITLE = ""
@@ -57,7 +59,7 @@ FINALTIED_DESCRIPTION = ""
 FINALTIED_BODY = ""
 
 SEVENTH_INNING_STRETCH = "https://www.youtube.com/watch?v=5FZZna_3f_0"
-#SEVENTH_INNING_STRETCH = "<@202599348473692161> https://www.youtube.com/watch?v=7KPfOVw3JwY"
+# SEVENTH_INNING_STRETCH = "<@202599348473692161> https://www.youtube.com/watch?v=7KPfOVw3JwY"
 
 
 DELAY = 30

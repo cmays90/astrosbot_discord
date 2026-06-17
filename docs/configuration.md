@@ -6,6 +6,7 @@
 |-----|------|----------|-------------|
 | `DB_FILE` | string | Yes | Path to the SQLite database file |
 | `TEAM_ID` | integer | Yes | MLB numeric team ID of the team to follow |
+| `WIN_MESSAGES` | string or array of strings | No | Message posted (as plain text, so links such as YouTube render a preview) when `TEAM_ID` wins. A string is posted verbatim; an array is indexed by `season_game_number % len`, rotating each game. If absent — or the team loses / isn't in the game — the default "Everyone is a winner in my book" embed is posted instead. |
 
 ## Platform Settings (sensitive, not committed)
 

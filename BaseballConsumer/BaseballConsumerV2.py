@@ -302,6 +302,8 @@ class BaseballUpdaterBotV2:
             self.TEAM_ID = settings.get('TEAM_ID')
             if self.TEAM_ID is None: return "Missing TEAM_ID"
 
+            self.WIN_MESSAGES = settings.get('WIN_MESSAGES')  # optional: str or list[str]
+
         return 0
 
     def getTime(self):
@@ -365,6 +367,35 @@ class BaseballUpdaterBotV2:
             if game_status_embed.title or game_status_embed.description:
                 await queue.put({'msg': game_status_post, 'embed': game_status_embed, 'game_id': None})
 
+    async def select_win_message(self, game):
+        """Return the custom win message if TEAM_ID is in this game and won,
+        else None (caller falls back to the default game-over embed)."""
+        messages = self.WIN_MESSAGES
+        if not messages:
+            return None
+        if game['home_id'] == self.TEAM_ID:
+            our_score, opp_score, side = game['home_score'], game['away_score'], 'home'
+        elif game['away_id'] == self.TEAM_ID:
+            our_score, opp_score, side = game['away_score'], game['home_score'], 'away'
+        else:
+            return None
+        try:
+            if int(our_score) <= int(opp_score):
+                return None
+        except (TypeError, ValueError):
+            return None
+        if isinstance(messages, str):
+            return messages
+        if isinstance(messages, list) and messages:
+            try:
+                data = await asyncio.to_thread(
+                    statsapi.get, 'game', {'gamePk': game['game_id']})
+                game_number = data['gameData']['teams'][side]['record']['gamesPlayed']
+            except (HTTPError, KeyError):
+                return None  # fall back rather than guess
+            return messages[game_number % len(messages)]
+        return None
+
     async def postGameStatusOnDiscord(self, queue, game):
         game_status_embed = discord.Embed(title="Game Status Update".format(game['status']),
                                           description=game['status'])
@@ -416,9 +447,14 @@ class BaseballUpdaterBotV2:
                                               description=constants.POSTPONED_DESCRIPTION)
             game_status_post = constants.POSTPONED_BODY
         if game['status'] == 'Game Over':
-            game_status_embed = discord.Embed(title=constants.GAMEOVER_TITLE,
-                                              description=constants.GAMEOVER_DESCRIPTION)
-            game_status_post = constants.GAMEOVER_BODY
+            win_msg = await self.select_win_message(game)
+            if win_msg:
+                game_status_embed = discord.Embed()   # empty -> not sent; message-only so link preview renders
+                game_status_post = win_msg
+            else:
+                game_status_embed = discord.Embed(title=constants.GAMEOVER_TITLE,
+                                                  description=constants.GAMEOVER_DESCRIPTION)
+                game_status_post = constants.GAMEOVER_BODY
             extras['event_end'] = True
         if game['status'] == 'Final':
             game_status_embed = discord.Embed(title=constants.FINAL_TITLE, description=constants.FINAL_DESCRIPTION)
