@@ -36,6 +36,7 @@ DISCORD_GAME_THREAD_CHANNEL_ID = None
 DISCORD_GUILD = None
 ANNOUNCEMENT_CHANNEL = None
 DELETE_ANNOUNCEMENT = False
+OWNER_ACCOUNT_ID = None
 
 _LOG_FORMAT = '%(asctime)s %(levelname)s:%(name)s:%(message)s'
 _LOG_DIR = 'BaseballConsumer/logs'
@@ -136,6 +137,7 @@ def _migrate_json_to_db():
 def read_settings():
     global DB_FILE, DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, DISCORD_TOKEN
     global DISCORD_GAME_THREAD_CHANNEL_ID, DISCORD_GUILD, ANNOUNCEMENT_CHANNEL, DELETE_ANNOUNCEMENT
+    global OWNER_ACCOUNT_ID
 
     errors = []
 
@@ -166,6 +168,9 @@ def read_settings():
         if ANNOUNCEMENT_CHANNEL is None:
             errors.append("Missing ANNOUNCEMENT_CHANNEL")
         DELETE_ANNOUNCEMENT = settings.get('DELETE_ANNOUNCEMENT', False)
+        OWNER_ACCOUNT_ID = settings.get('OWNER_ACCOUNT_ID')
+        if OWNER_ACCOUNT_ID is None:
+            logger.warning("Missing OWNER_ACCOUNT_ID — the !sync command will be disabled.")
 
     if errors:
         for error in errors:
@@ -395,14 +400,28 @@ class BaseballCog(commands.Cog):
             return
         await ctx.reply("```\n" + "\n".join(lines) + "\n```")
 
+    @commands.command()
+    async def sync(self, ctx, guild_id: int = None):
+        """Owner-only: (re)sync slash commands globally, or to one guild if given."""
+        if OWNER_ACCOUNT_ID is None or str(ctx.author.id) != str(OWNER_ACCOUNT_ID):
+            return
+        try:
+            if guild_id:
+                guild = discord.Object(id=guild_id)
+                self.bot.tree.copy_global_to(guild=guild)
+                synced = await self.bot.tree.sync(guild=guild)
+                where = f" to guild {guild_id}"
+            else:
+                synced = await self.bot.tree.sync()
+                where = ""
+            await ctx.reply(f"Synced {len(synced)} command(s){where}.")
+        except Exception:
+            logger.exception('Failed to sync slash commands')
+            await ctx.reply("Failed to sync slash commands — check the logs.")
+
     @commands.Cog.listener()
     async def on_ready(self):
         logger.info('Logged in as %s ||| %s', self.bot.user.name, self.bot.user.id)
-        try:
-            synced = await self.bot.tree.sync()
-            logger.info('Synced %d slash command(s)', len(synced))
-        except Exception:
-            logger.exception('Failed to sync slash commands')
 
     @commands.Cog.listener()
     async def on_raw_reaction_add(self, payload):
@@ -415,12 +434,23 @@ class BaseballCog(commands.Cog):
             counts[1] += 1
 
 
+class AstrosBot(commands.Bot):
+    async def setup_hook(self):
+        """Runs once per process, before connecting to the gateway. Sync the
+        slash command tree here (not in on_ready, which can fire repeatedly)."""
+        try:
+            synced = await self.tree.sync()
+            logger.info('Synced %d slash command(s)', len(synced))
+        except Exception:
+            logger.exception('Failed to sync slash commands')
+
+
 async def main():
     asyncio.get_event_loop().slow_callback_duration = 1
     intents = discord.Intents.default()
     intents.message_content = True
     intents.typing = False
-    bot = commands.Bot(command_prefix='!', description="/r/Astros Discord Poster", intents=intents)
+    bot = AstrosBot(command_prefix='!', description="/r/Astros Discord Poster", intents=intents)
     await bot.add_cog(BaseballCog(bot))
 
     read_settings()
