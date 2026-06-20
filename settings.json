@@ -1,5 +1,12 @@
 {
   "DB_FILE": "BaseballConsumer/logs/game_events.db",
   "TEAM_ID": 117,
-  "WIN_MESSAGES": ["https://www.youtube.com/watch?v=JvSXJ4_g228"]
+  "WIN_MESSAGES": [
+    "https://www.youtube.com/watch?v=JvSXJ4_g228",
+    "https://tenor.com/view/astros-altuve-earn-history-dance-gif-10113929",
+    "https://tenor.com/view/pena-houston-astros-mlb-gif-6965360022589634324",
+    "https://tenor.com/view/astros-orbit-spaceman-alien-gif-14952879",
+    "https://tenor.com/view/houston-astros-orbit-mascot-mascots-mlb-gif-16296726",
+    "https://tenor.com/view/houston-astros-astrodome-home-run-gif-25773113"
+  ]
 }
