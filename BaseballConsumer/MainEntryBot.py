@@ -14,9 +14,13 @@ import os
 import discord
 import BaseballConsumerConstants as constants
 from discord.ext import commands
+from discord import app_commands
 
 import asyncio
-from BaseballConsumerV2 import BaseballUpdaterBotV2, current_pitcher_count, format_pitch_count_line
+from BaseballConsumerV2 import (
+    BaseballUpdaterBotV2, current_pitcher_count, format_pitch_count_line,
+    build_lineups_message,
+)
 import statsapi
 import datetime
 
@@ -399,6 +403,24 @@ class BaseballCog(commands.Cog):
             await ctx.reply("No active pitchers right now.")
             return
         await ctx.reply("```\n" + "\n".join(lines) + "\n```")
+
+    @app_commands.command(name='lineups',
+                          description="Post both teams' starting lineups.")
+    async def lineups(self, interaction: discord.Interaction):
+        """Slash-only (no ! prefix) so it doesn't collide with another bot's
+        !lineups. Posts both teams' starting lineups for this game thread."""
+        game_id = _db_get_game_by_thread(str(interaction.channel.id))
+        if game_id is None:
+            await interaction.response.send_message(
+                "This command is only available in a game thread.", ephemeral=True)
+            return
+        await interaction.response.defer(thinking=True)
+        game = await asyncio.to_thread(statsapi.get, 'game', {'gamePk': game_id})
+        msg = build_lineups_message(game)
+        if not msg:
+            await interaction.followup.send("Lineups aren't available yet.")
+            return
+        await interaction.followup.send(msg)
 
     @commands.command()
     async def sync(self, ctx, guild_id: int = None):

@@ -40,9 +40,48 @@ SETTINGS_FILE = './settings.json'
 
 logger = logging.getLogger(__name__)
 
+# Game statuses where lineups either don't exist yet or no longer matter, so we
+# don't bother fetching/posting them.
+_LINEUP_SKIP = {'Scheduled', 'Final', 'Game Over', 'Game Over: Tied',
+                'Final: Tied', 'Completed Early: Rain', 'Postponed'}
+
 
 def format_pitch_count_line(name, balls, strikes, total):
     return "{} — Balls: {}, Strikes: {}, Total: {}".format(name, balls, strikes, total)
+
+
+def build_lineups_message(game_data):
+    """Return a 2-code-block lineup string (away then home), or None if either
+    team's batting order isn't set yet."""
+    boxscore = game_data.get('liveData', {}).get('boxscore', {})
+    gdata_teams = game_data.get('gameData', {}).get('teams', {})
+    blocks = []
+    for side in ('away', 'home'):
+        team = boxscore.get('teams', {}).get(side, {})
+        order = team.get('battingOrder') or []
+        if not order:
+            return None                      # not both set -> bail
+        players = team.get('players', {})
+        rows = []                            # (num, name, pos, slash, hr, rbi)
+        for i, pid in enumerate(order, 1):
+            p = players.get('ID{}'.format(pid), {})
+            name = p.get('person', {}).get('fullName', 'TBD')
+            pos = p.get('position', {}).get('abbreviation', '')
+            b = p.get('seasonStats', {}).get('batting', {})
+            slash = '/'.join(str(b.get(k, '.---')) for k in ('avg', 'obp', 'slg', 'ops'))
+            hr = b.get('homeRuns', 0)
+            rbi = b.get('rbi', 0)
+            rows.append((i, name, pos, slash, hr, rbi))
+        width = max(len(r[1]) for r in rows)
+        slash_w = max(len(r[3]) for r in rows)
+        team_name = gdata_teams.get(side, {}).get('name', side.title())
+        lines = [team_name] + [
+            '{}. {:<{w}} {:<2} | {:<{sw}} | {:>2} HR  {:>3} RBI'.format(
+                n, name, pos, slash, hr, rbi, w=width, sw=slash_w)
+            for (n, name, pos, slash, hr, rbi) in rows
+        ]
+        blocks.append('```\n' + '\n'.join(lines) + '\n```')
+    return '\n'.join(blocks)
 
 
 def current_pitcher_count(boxscore, side):
@@ -132,6 +171,31 @@ class BaseballUpdaterBotV2:
                         ids_of_prev_events.add(gameStatusId)
 
                     logger.info("Game is %s.", game_status)
+
+                    # Post both teams' starting lineups once they're both set
+                    # (happens during Pre-Game/Warmup). Only logs after a message
+                    # is actually built, so it keeps retrying until lineups drop.
+                    lineup_id = 'Lineups;{}'.format(game['game_id'])
+                    if lineup_id not in ids_of_prev_events and game_status not in _LINEUP_SKIP:
+                        retry = 0
+                        while True:
+                            try:
+                                lineup_game_data = await asyncio.to_thread(
+                                    statsapi.get, 'game', {'gamePk': game['game_id']}
+                                )
+                                break
+                            except HTTPError as e:
+                                logger.warning("HTTPError fetching lineups (HTTP %s): %s",
+                                               e.response.status_code if e.response is not None else '?',
+                                               e.response.text[:500] if e.response is not None else str(e))
+                                await asyncio.sleep(2 * retry + 1)
+                                if retry < 30:
+                                    retry += 1
+                        lineup_msg = build_lineups_message(lineup_game_data)
+                        if lineup_msg:
+                            await queue.put({'msg': lineup_msg, 'game_id': game['game_id']})
+                            self._log_event(lineup_id, game_date_str, "Lineups")
+                            ids_of_prev_events.add(lineup_id)
 
                     # Change the update period based on the game_status
                     if game_status in ['Scheduled']:
