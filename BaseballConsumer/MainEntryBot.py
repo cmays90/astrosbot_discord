@@ -459,10 +459,22 @@ class BaseballCog(commands.Cog):
 class AstrosBot(commands.Bot):
     async def setup_hook(self):
         """Runs once per process, before connecting to the gateway. Sync the
-        slash command tree here (not in on_ready, which can fire repeatedly)."""
+        slash command tree here (not in on_ready, which can fire repeatedly).
+
+        Sync to DISCORD_GUILD specifically: guild syncs apply instantly, while a
+        global sync can take up to an hour to propagate (which is why new
+        commands weren't showing up on the main server). A guild command
+        overrides a same-named global command in that guild, so this does not
+        create duplicates."""
         try:
-            synced = await self.tree.sync()
-            logger.info('Synced %d slash command(s)', len(synced))
+            if DISCORD_GUILD:
+                guild = discord.Object(id=int(DISCORD_GUILD))
+                self.tree.copy_global_to(guild=guild)
+                synced = await self.tree.sync(guild=guild)
+                logger.info('Synced %d slash command(s) to guild %s', len(synced), DISCORD_GUILD)
+            else:
+                synced = await self.tree.sync()
+                logger.info('Synced %d slash command(s) globally', len(synced))
         except Exception:
             logger.exception('Failed to sync slash commands')
 
