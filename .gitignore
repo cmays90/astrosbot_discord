@@ -11,3 +11,5 @@ BaseballConsumer/logs/game_events.db
 BaseballConsumer/logs/game_thread.now
 events.json
 threads.json
+
+*.doNotUpload.json

@@ -78,9 +78,9 @@ async def test_full_game():
         thread_msgs = disc.messages_to_threads()
         assert thread_msgs, "Expected play-by-play messages in the game thread"
 
-        # Game-started embed should have been sent.
-        embed_msgs = [e for e in disc.event_log if e.get('has_embed')]
-        assert embed_msgs, "Expected at least one embed message"
+        # Rich cards (Components V2 views) should have been sent.
+        card_msgs = [e for e in disc.event_log if e.get('has_view')]
+        assert card_msgs, "Expected at least one card (view) message"
 
         # The Discord scheduled event must have been created and then completed.
         events_created = disc.events_created()

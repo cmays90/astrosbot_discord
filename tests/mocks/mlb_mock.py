@@ -80,9 +80,17 @@ class GameReplayer:
         """0-based index of the current In Progress poll."""
         return self._schedule_calls - self.scheduled_polls - 2
 
+    # Optional fields the final card reads off the schedule dict; passed through
+    # from the fixture when a captured real game provides them.
+    _SCHEDULE_PASSTHROUGH = (
+        'away_name', 'home_name', 'away_score', 'home_score',
+        'winning_pitcher', 'losing_pitcher', 'save_pitcher',
+        'venue_name', 'series_status',
+    )
+
     def _schedule_item(self, status: str) -> list:
         info = self.fixture['game_info']
-        return [{
+        item = {
             'game_id': info['game_id'],
             'game_date': info['game_date'],
             'game_datetime': info['game_datetime'],
@@ -91,7 +99,11 @@ class GameReplayer:
             'home_id': info['home_id'],
             'game_num': info.get('game_num', 1),
             'doubleheader': info.get('doubleheader', 'N'),
-        }]
+        }
+        for k in self._SCHEDULE_PASSTHROUGH:
+            if k in info:
+                item[k] = info[k]
+        return [item]
 
     # ------------------------------------------------------------------ #
     #  statsapi surface                                                    #

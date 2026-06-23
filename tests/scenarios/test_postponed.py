@@ -75,10 +75,12 @@ async def test_postponed():
     # A thread must be created (Scheduled fires first).
     assert disc.threads_created(), "Expected game thread created on Scheduled status"
 
-    # A Postponed embed should have been sent to the thread.
-    embed_msgs = [
+    # A Postponed card (Components V2 view) should have been sent to the thread.
+    card_msgs = [
         e for e in disc.event_log
-        if e['type'] == 'message_sent' and e.get('has_embed') and 'thread_id' in e
+        if e['type'] == 'message_sent' and e.get('has_view') and 'thread_id' in e
     ]
-    assert embed_msgs, "Expected a Postponed embed in the game thread"
-    print(f"  Thread embeds: {len(embed_msgs)}")
+    assert card_msgs, "Expected a Postponed card in the game thread"
+    assert any('Game cancelled' in e.get('view_text', '') for e in card_msgs), \
+        "Expected the Postponed card to carry the postponed copy"
+    print(f"  Thread cards: {len(card_msgs)}")

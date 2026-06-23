@@ -30,8 +30,8 @@ except ImportError:
     )
 from datetime import datetime, timedelta
 import asyncio
-import discord
 import json
+import cards
 import BaseballConsumerConstants as constants
 import logging
 import pytz
@@ -44,44 +44,6 @@ logger = logging.getLogger(__name__)
 # don't bother fetching/posting them.
 _LINEUP_SKIP = {'Scheduled', 'Final', 'Game Over', 'Game Over: Tied',
                 'Final: Tied', 'Completed Early: Rain', 'Postponed'}
-
-
-def format_pitch_count_line(name, balls, strikes, total):
-    return "{} — Balls: {}, Strikes: {}, Total: {}".format(name, balls, strikes, total)
-
-
-def build_lineups_message(game_data):
-    """Return a 2-code-block lineup string (away then home), or None if either
-    team's batting order isn't set yet."""
-    boxscore = game_data.get('liveData', {}).get('boxscore', {})
-    gdata_teams = game_data.get('gameData', {}).get('teams', {})
-    blocks = []
-    for side in ('away', 'home'):
-        team = boxscore.get('teams', {}).get(side, {})
-        order = team.get('battingOrder') or []
-        if not order:
-            return None                      # not both set -> bail
-        players = team.get('players', {})
-        rows = []                            # (num, name, pos, slash, hr, rbi)
-        for i, pid in enumerate(order, 1):
-            p = players.get('ID{}'.format(pid), {})
-            name = p.get('person', {}).get('fullName', 'TBD')
-            pos = p.get('position', {}).get('abbreviation', '')
-            b = p.get('seasonStats', {}).get('batting', {})
-            slash = '/'.join(str(b.get(k, '.---')) for k in ('avg', 'obp', 'slg', 'ops'))
-            hr = b.get('homeRuns', 0)
-            rbi = b.get('rbi', 0)
-            rows.append((i, name, pos, slash, hr, rbi))
-        width = max(len(r[1]) for r in rows)
-        slash_w = max(len(r[3]) for r in rows)
-        team_name = gdata_teams.get(side, {}).get('name', side.title())
-        lines = [team_name] + [
-            '{}. {:<{w}} {:<2} | {:<{sw}} | {:>2} HR  {:>3} RBI'.format(
-                n, name, pos, slash, hr, rbi, w=width, sw=slash_w)
-            for (n, name, pos, slash, hr, rbi) in rows
-        ]
-        blocks.append('```\n' + '\n'.join(lines) + '\n```')
-    return '\n'.join(blocks)
 
 
 def current_pitcher_count(boxscore, side):
@@ -191,9 +153,9 @@ class BaseballUpdaterBotV2:
                                 await asyncio.sleep(2 * retry + 1)
                                 if retry < 30:
                                     retry += 1
-                        lineup_msg = build_lineups_message(lineup_game_data)
-                        if lineup_msg:
-                            await queue.put({'msg': lineup_msg, 'game_id': game['game_id']})
+                        lineup_view = cards.lineup_card(lineup_game_data)
+                        if lineup_view is not None:
+                            await queue.put({'view': lineup_view, 'game_id': game['game_id']})
                             self._log_event(lineup_id, game_date_str, "Lineups")
                             ids_of_prev_events.add(lineup_id)
 
@@ -277,6 +239,7 @@ class BaseballUpdaterBotV2:
                             info['manOnFirst'] = True if 'postOnFirst' in play['matchup'] else False
                             info['manOnSecond'] = True if 'postOnSecond' in play['matchup'] else False
                             info['manOnThird'] = True if 'postOnThird' in play['matchup'] else False
+                            info['batterId'] = play.get('matchup', {}).get('batter', {}).get('id')
                             info['runsScored'] = 0
                             info['rbis'] = 0
                             info['runsEarned'] = 0
@@ -332,9 +295,9 @@ class BaseballUpdaterBotV2:
                             if info['id'] not in ids_of_prev_events:
                                 self._log_event(info['id'], game_date_str, info['description'])
                                 ids_of_prev_events.add(info['id'])
-                                msg = self.comment_on_discord_event(info)
-                                if msg:
-                                    await queue.put({'msg': msg, 'active_game': True, 'game_id': game['game_id']})
+                                for q_item in self.build_event_items(info):
+                                    q_item['game_id'] = game['game_id']
+                                    await queue.put(q_item)
 
                     else:
                         logger.info("Novel game status %r — consider adding explicit handling.", game_status)
@@ -425,11 +388,7 @@ class BaseballUpdaterBotV2:
 
     async def postNoGameStatusOnDiscord(self, queue):
         if constants.NO_GAME_STATUS_TITLE or constants.NO_GAME_STATUS_DESCRIPTION:
-            game_status_embed = discord.Embed(title=constants.NO_GAME_STATUS_TITLE,
-                                              description=constants.NO_GAME_STATUS_DESCRIPTION)
-            game_status_post = constants.NO_GAME_STATUS_BODY
-            if game_status_embed.title or game_status_embed.description:
-                await queue.put({'msg': game_status_post, 'embed': game_status_embed, 'game_id': None})
+            await queue.put({'view': cards.no_game_card(), 'game_id': None})
 
     async def select_win_message(self, game):
         """Return the custom win message if TEAM_ID is in this game and won,
@@ -461,180 +420,75 @@ class BaseballUpdaterBotV2:
         return None
 
     async def postGameStatusOnDiscord(self, queue, game):
-        game_status_embed = discord.Embed(title="Game Status Update".format(game['status']),
-                                          description=game['status'])
-        game_status_post = ""
-        extras = {}
+        status = game['status']
 
-        active_game = False
-
-        # Different embeds and posts for each status
-        if game['status'] == 'Scheduled':
+        # Scheduled just signals the poster to create the thread/event — no card.
+        if status == 'Scheduled':
             await queue.put({'game_id': game['game_id']})
-            game_status_embed = discord.Embed(title=constants.SCHEDULED_GAME_STATUS_TITLE,
-                                              description=constants.SCHEDULED_GAME_STATUS_DESCRIPTION)
-            game_status_post = constants.SCHEDULED_GAME_STATUS_BODY
-        if game['status'] == 'Pre-Game':
-            game_status_embed = discord.Embed(title=constants.PREGAME_TITLE, description=constants.PREGAME_DESCRIPTION)
-            game_status_post = constants.PREGAME_BODY
-        if game['status'] == 'Warm Up' or game['status'] == "Warmup":
-            # pregamePost = "{:<3}: {} {} ({}-{} {})\n" \
-            #               "{:<3}: {} {} ({}-{} {})".format(
-            #     "away team", "away pitcher throwing hand",
-            #     "away pitcher name", "away pitcher wins",
-            #     "away pitcher losses", "away pitcher era",
-            #     "home team", "home pitcher throwing hand",
-            #     "home pitcher name", "home pitcher wins",
-            #     "home pitcher losses", "home pitcher era")
-            game_status_embed = discord.Embed(title=constants.WARMUP_TITLE,
-                                              description=f"{constants.WARMUP_DESCRIPTION}\n\nDelay set to {constants.DELAY} seconds.")
-            game_status_embed.set_image(url=str(constants.WARMUP_IMAGE))
-            game_status_post = constants.WARMUP_BODY  # pregamePost
-        # Specifically for Game Started (only goes first time game becomes "In Progress"
-        if game['status'] == 'In Progress':
-            game_status_embed = discord.Embed(title=constants.GAMESTARTED_TITLE,
-                                              description=constants.GAMESTARTED_DESCRIPTION)
-            game_status_post = constants.GAMESTARTED_BODY
-            active_game = True
-            extras['event_start'] = True
-        if game['status'] == 'Delayed: Rain' or game['status'] == 'Delayed Start: Rain':
-            game_status_embed = discord.Embed(title=constants.RAINDELAY_TITLE,
-                                              description=constants.RAINDELAY_DESCRIPTION)
-            game_status_post = constants.RAINDELAY_BODY
-        if game['status'] == 'Completed Early: Rain':
-            game_status_embed = discord.Embed(title=constants.COMPLETEDEARLYRAIN_TITLE,
-                                              description=constants.COMPLETEDEARLYRAIN_DESCRIPTION)
-            extras['event_end'] = True
-            game_status_post = constants.COMPLETEDEARLYRAIN_BODY
-        if game['status'] == 'Postponed':
-            game_status_embed = discord.Embed(title=constants.POSTPONED_TITLE,
-                                              description=constants.POSTPONED_DESCRIPTION)
-            game_status_post = constants.POSTPONED_BODY
-        if game['status'] == 'Game Over':
-            win_msg = await self.select_win_message(game)
-            if win_msg:
-                game_status_embed = discord.Embed()   # empty -> not sent; message-only so link preview renders
-                game_status_post = win_msg
-            else:
-                game_status_embed = discord.Embed(title=constants.GAMEOVER_TITLE,
-                                                  description=constants.GAMEOVER_DESCRIPTION)
-                game_status_post = constants.GAMEOVER_BODY
-            extras['event_end'] = True
-        if game['status'] == 'Final':
-            game_status_embed = discord.Embed(title=constants.FINAL_TITLE, description=constants.FINAL_DESCRIPTION)
-            game_status_post = constants.FINAL_BODY
-            extras['event_end'] = True
-        if game['status'] == 'Game Over: Tied':
-            game_status_embed = discord.Embed(title=constants.GAMEOVERTIED_TITLE,
-                                              description=constants.GAMEOVERTIED_DESCRIPTION)
-            game_status_post = constants.GAMEOVERTIED_BODY
-            extras['event_end'] = True
-        if game['status'] == 'Final: Tied':
-            game_status_embed = discord.Embed(title=constants.FINALTIED_TITLE,
-                                              description=constants.FINALTIED_DESCRIPTION)
-            game_status_post = constants.FINALTIED_BODY
-            extras['event_end'] = True
-        # await asyncio.sleep(15)
-        if game_status_post or game_status_embed.title or game_status_embed.description:
-            await queue.put({'msg': game_status_post, 'embed': game_status_embed, 'active_game': active_game,
-                             'game_id': game['game_id'], 'extras': extras})
+            return
 
-    def comment_on_discord_event(self, info):
+        item = {'game_id': game['game_id'], 'extras': {}}
+
+        # Finished games (incl. rain-shortened) get the marquee final card. For a
+        # win we also pass the celebration link through as a trailing message so
+        # its GIF/video preview still renders (a V2 view can't carry one).
+        if status in cards.FINAL_STATES:
+            item['extras']['event_end'] = True
+            item['view'] = cards.final_card(game, self.TEAM_ID)
+            if status == 'Game Over':
+                win_msg = await self.select_win_message(game)
+                if win_msg:
+                    item['msg'] = win_msg
+            await queue.put(item)
+            return
+
+        # In-progress / pre-game / delay status cards.
+        if status == 'Pre-Game':
+            item['view'] = cards.status_card(game, constants.PREGAME_TITLE,
+                                             constants.PREGAME_DESCRIPTION, constants.PREGAME_BODY)
+        elif status in ('Warm Up', 'Warmup'):
+            item['view'] = cards.status_card(
+                game, constants.WARMUP_TITLE,
+                "{}\n\nDelay set to {} seconds.".format(constants.WARMUP_DESCRIPTION, constants.DELAY),
+                constants.WARMUP_BODY, accent=cards.RAIN_SLATE, image_url=str(constants.WARMUP_IMAGE))
+        elif status == 'In Progress':
+            item['view'] = cards.status_card(game, constants.GAMESTARTED_TITLE,
+                                             constants.GAMESTARTED_DESCRIPTION,
+                                             constants.GAMESTARTED_BODY, accent=cards.WIN_GREEN)
+            item['active_game'] = True
+            item['extras']['event_start'] = True
+        elif status in ('Delayed: Rain', 'Delayed Start: Rain'):
+            item['view'] = cards.status_card(game, constants.RAINDELAY_TITLE,
+                                             constants.RAINDELAY_DESCRIPTION,
+                                             constants.RAINDELAY_BODY, accent=cards.RAIN_SLATE)
+        elif status == 'Postponed':
+            item['view'] = cards.status_card(game, constants.POSTPONED_TITLE,
+                                             constants.POSTPONED_DESCRIPTION,
+                                             constants.POSTPONED_BODY, accent=cards.RAIN_SLATE)
+        else:
+            item['view'] = cards.status_card(game, "Game Status Update", status, "")
+
+        await queue.put(item)
+
+    def build_event_items(self, info):
+        """Build the queue item(s) for one play: an at-bat / player-change card,
+        plus an end-of-inning card when the third out lands. Only the first item
+        carries active_game so the broadcast delay applies once per play."""
+        info['funEmoji'] = self.funEmoji(info)
         if info['playTypeActual'] == 'atBat':
-            comment = self.formatGameEventForDiscord(info)
+            atbat = {'view': cards.atbat_card(info), 'active_game': True}
+            bases_img = cards.bases_image_path(info)
+            if bases_img:
+                atbat['bases_image'] = bases_img
+            items = [atbat]
         else:
-            comment = self.formatPlayerChangeForDiscord(info)
-        return comment
-
-    def formatGameEventForDiscord(self, info):
-        return "```" \
-               "{}\n" \
-               "{}{}\n" \
-               "```\n" \
-               "{}" \
-               "{}".format(self.formatLinescoreForDiscord(info)
-                           if not self.gameEventInningBeforeCurrentLinescoreInning(info)
-                           else self.formatLinescoreCatchingUpForDiscord(info),
-                           self.formatPitchCount(info), info['description'],
-                           self.funEmoji(info),
-                           self.end_of_inning(info))
-
-    def formatLinescoreForDiscord(self, info):
-        return "{}   ┌───┬──┬──┬──┐\n" \
-               "   {}     │{:<3}│{:>2}│{:>2}│{:>2}│\n" \
-               "  {} {}    ├───┼──┼──┼──┤\n" \
-               "{}   │{:<3}│{:>2}│{:>2}│{:>2}│\n" \
-               "         └───┴──┴──┴──┘".format(
-            self.formatInning(info),
-            self.formatSecondBase(info['manOnSecond']),
-            info['awayTeamAbbv'].upper(), info['awayStats_linescore']['runs'], info['awayStats_linescore']['hits'],
-            info['awayStats_linescore']['errors'],
-            self.formatThirdBase(info['manOnThird']), self.formatFirstBase(info['manOnFirst']),
-            self.formatOuts(info['outs']),
-            info['homeTeamAbbv'].upper(), info['homeStats_linescore']['runs'], info['homeStats_linescore']['hits'],
-            info['homeStats_linescore']['errors']
-        )
-
-    def gameEventInningBeforeCurrentLinescoreInning(self, info):
-        return True if int(info['inning']) < int(info['currentInning_linescore']) else False
-
-    def formatLinescoreCatchingUpForDiscord(self, info):
-        return "{}\n" \
-               "\n" \
-               "  BOT         CATCHING\n" \
-               " BEHIND          UP\n" \
-               "".format(
-            self.formatInning(info)
-        )
-
-    def formatInning(self, info):
-        return "{} {:>2}".format(info['inningHalf'].upper()[0:3], info['inning'])
-
-    def formatOuts(self, outs):
-        outOrOuts = " Outs"
-        if outs == "1": outOrOuts = "  Out"
-        return "".join([outs, outOrOuts])
-
-    def formatFirstBase(self, runnerOnBaseStatus):
-        return self.formatBase(runnerOnBaseStatus)
-
-    def formatSecondBase(self, runnerOnBaseStatus):
-        return self.formatBase(runnerOnBaseStatus)
-
-    def formatThirdBase(self, runnerOnBaseStatus):
-        return self.formatBase(runnerOnBaseStatus)
-
-    def formatBase(self, baseOccupied):
-        if baseOccupied:
-            return "●"
-        return "○"
-
-    def formatPitchCount(self, info):
-        if info['playType'] == 'atBat':
-            return "On a {}-{} count, ".format(info['balls'], info['strikes'])
-        else:
-            return ""
-
-    def end_of_inning(self, info):
+            items = [{'view': cards.player_change_card(info), 'active_game': True}]
         if info['outs'] == "3":
-            end_of_inning_string = "```------ End of {} ------\n{}\n------ End of {} ------\n\nCurrent delay set to " \
-                                   "{} seconds.```".format(
-                self.formatInning(info), info['fullLinescoreString'], self.formatInning(info), constants.DELAY)
-            pitcher_count = info.get('pitcherCount')
-            if pitcher_count:
-                end_of_inning_string = "{}\n```{}```".format(
-                    end_of_inning_string, format_pitch_count_line(*pitcher_count))
+            eoi = {'view': cards.end_of_inning_card(info)}
             if info['inning'] == "7" and info['inningHalf'].upper()[0:3] == "TOP":
-                end_of_inning_string = "{}\n{}".format(end_of_inning_string, constants.SEVENTH_INNING_STRETCH)
-            return end_of_inning_string
-        return ""
-
-    def formatPlayerChangeForDiscord(self, info):
-        return "```" \
-               "{}\n" \
-               "```\n" \
-               "{}".format(info['description'],
-                           self.end_of_inning(info))
+                eoi['msg'] = constants.SEVENTH_INNING_STRETCH
+            items.append(eoi)
+        return items
 
     async def lookupTeamInfo(self, id):
         retry = 0

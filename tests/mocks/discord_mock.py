@@ -16,12 +16,33 @@ def _next_id() -> int:
     return next(_id_counter)
 
 
+def view_text(view) -> str:
+    """Flatten all TextDisplay content in a LayoutView into one string so tests
+    can assert on card copy."""
+    if view is None:
+        return ""
+    parts = []
+
+    def walk(item):
+        content = getattr(item, 'content', None)
+        if isinstance(content, str):
+            parts.append(content)
+        for child in getattr(item, 'children', []) or []:
+            walk(child)
+
+    for child in getattr(view, 'children', []) or []:
+        walk(child)
+    return "\n".join(parts)
+
+
 class MockMessage:
-    def __init__(self, channel_id: int, content=None, embed=None, bot=None):
+    def __init__(self, channel_id: int, content=None, embed=None, view=None, poll=None, bot=None):
         self.id = _next_id()
         self.channel_id = channel_id
         self.content = content
         self.embed = embed
+        self.view = view
+        self.poll = poll
         self._bot = bot
 
     async def create_thread(self, name: str) -> "MockThread":
@@ -39,9 +60,14 @@ class MockMessage:
     async def add_reaction(self, emoji):
         pass
 
-    async def edit(self, content=None, embed=None):
+    async def end_poll(self):
+        self._bot._record('poll_ended', {'msg_id': self.id})
+        return self
+
+    async def edit(self, content=None, embed=None, view=None):
         self.content = content or self.content
         self.embed = embed or self.embed
+        self.view = view or self.view
 
 
 class MockThread:
@@ -51,8 +77,8 @@ class MockThread:
         self._bot = bot
         self.messages: list[MockMessage] = []
 
-    async def send(self, content=None, embed=None) -> MockMessage:
-        msg = MockMessage(self.id, content=content, embed=embed, bot=self._bot)
+    async def send(self, content=None, embed=None, view=None, files=None) -> MockMessage:
+        msg = MockMessage(self.id, content=content, embed=embed, view=view, bot=self._bot)
         self.messages.append(msg)
         self._bot._record('message_sent', {
             'thread_id': self.id,
@@ -60,6 +86,9 @@ class MockThread:
             'content': content,
             'has_embed': embed is not None,
             'embed_title': embed.title if embed else None,
+            'has_view': view is not None,
+            'view_text': view_text(view),
+            'file_count': len(files) if files else 0,
         })
         return msg
 
@@ -79,13 +108,16 @@ class MockChannel:
         self._bot = bot
         self.messages: list[MockMessage] = []
 
-    async def send(self, content=None, embed=None) -> MockMessage:
-        msg = MockMessage(self.id, content=content, embed=embed, bot=self._bot)
+    async def send(self, content=None, embed=None, view=None, poll=None) -> MockMessage:
+        msg = MockMessage(self.id, content=content, embed=embed, view=view, poll=poll, bot=self._bot)
         self.messages.append(msg)
         self._bot._record('message_sent', {
             'channel_id': self.id,
             'content': content,
             'has_embed': embed is not None,
+            'has_view': view is not None,
+            'view_text': view_text(view),
+            'has_poll': poll is not None,
         })
         return msg
 

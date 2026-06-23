@@ -7,6 +7,8 @@ tar -czf "$OUTPUT" \
     BaseballConsumer/MainEntryBot.py \
     BaseballConsumer/BaseballConsumerV2.py \
     BaseballConsumer/BaseballConsumerConstants.py \
+    BaseballConsumer/cards.py \
+    BaseballConsumer/assets/bases \
     BaseballConsumer/__init__.py \
     BaseballConsumer/logs/game_events.db \
     settings.json \

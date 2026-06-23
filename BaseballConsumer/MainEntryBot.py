@@ -12,15 +12,13 @@ import json
 import sqlite3
 import os
 import discord
+import cards
 import BaseballConsumerConstants as constants
 from discord.ext import commands
 from discord import app_commands
 
 import asyncio
-from BaseballConsumerV2 import (
-    BaseballUpdaterBotV2, current_pitcher_count, format_pitch_count_line,
-    build_lineups_message,
-)
+from BaseballConsumerV2 import BaseballUpdaterBotV2, current_pitcher_count
 import statsapi
 import datetime
 
@@ -29,8 +27,7 @@ GAME_SETTINGS_FILE = './settings.json'
 TEAMS_FILE = './teams.json'
 
 logger = logging.getLogger(__name__)
-counts = [0, 0]
-msgid = 0
+msgid = 0  # in-flight delay-poll message id, used as a simple concurrency lock
 
 DB_FILE = None
 DISCORD_CLIENT_ID = None
@@ -279,12 +276,19 @@ async def discord_poster(bot, _queue):
             if "active_game" in item and item["active_game"]:
                 await asyncio.sleep(constants.DELAY)
 
-            if ('embed' in item or 'msg' in item) and thread is not None:
-                if 'embed' in item and item['embed'] and (item['embed'].title or item['embed'].description):
+            if thread is not None:
+                if item.get('view') is not None:
+                    if item.get('bases_image'):
+                        await thread.send(
+                            view=item['view'],
+                            files=[discord.File(item['bases_image'], filename=cards.BASES_ATTACHMENT)])
+                    else:
+                        await thread.send(view=item['view'])
+                elif item.get('embed') and (item['embed'].title or item['embed'].description):
                     await thread.send(embed=item['embed'])
-                if 'msg' in item and item['msg']:
+                if item.get('msg'):
                     await thread.send(item['msg'])
-            else:
+            elif item.get('view') is not None or 'embed' in item or 'msg' in item:
                 logger.info("Thread is none! Should not be none!")
 
             if 'extras' in item and 'event_end' in item['extras'] and item['extras']['event_end']:
@@ -357,28 +361,36 @@ class BaseballCog(commands.Cog):
             await ctx.reply("I am already running a poll!")
             return
         try:
-            global counts
-            counts = [0, 0]
-            e = discord.Embed(
-                title=f"Do you want a {_delay} second delay before events are posted to this channel?",
-                description="1⃣ Yes\n2⃣ No"
+            # Discord's minimum poll duration is 1 hour, so we open it and end it
+            # early to keep the original 30-second voting window.
+            poll = discord.Poll(
+                question=f"Set a {_delay} second delay before events post to this channel?",
+                duration=datetime.timedelta(hours=1),
             )
-            msg = await ctx.reply("30 seconds remaining to vote", embed=e)
+            poll.add_answer(text="Yes", emoji="✅")
+            poll.add_answer(text="No", emoji="❌")
+            msg = await ctx.send("30 seconds remaining to vote", poll=poll)
             msgid = msg.id
-            for emoji in ["1⃣", "2⃣"]:
-                await msg.add_reaction(emoji)
             for i in range(0, 6):
                 await msg.edit(content=f"{30 - i * 5} seconds remaining to vote")
                 await asyncio.sleep(5)
             await msg.edit(content="Voting ended.")
-            if counts[0] > counts[1]:
+            try:
+                await msg.end_poll()
+            except Exception:
+                logger.exception("Failed to end delay poll early")
+            # Re-fetch so the final tallies are populated.
+            fresh = await ctx.channel.fetch_message(msg.id)
+            tally = {a.text: a.vote_count for a in fresh.poll.answers} if fresh.poll else {}
+            if tally.get("Yes", 0) > tally.get("No", 0):
                 await ctx.send(f"The vote passes!  Delay has been set to {_delay} seconds")
                 constants.DELAY = _delay
             else:
                 await ctx.send(f"The vote failed!  Delay shall remain {constants.DELAY} seconds")
             msgid = 0
         except Exception:
-            await ctx.reply("Error parsing your delay")
+            msgid = 0
+            await ctx.reply("Error running the delay poll")
             raise
 
     @commands.hybrid_command(name='pitchcount', aliases=['pc'],
@@ -391,18 +403,18 @@ class BaseballCog(commands.Cog):
             return
         game = await asyncio.to_thread(statsapi.get, 'game', {'gamePk': game_id})
         boxscore = game.get('liveData', {}).get('boxscore', {})
-        lines = []
+        entries = []
         for side in ('away', 'home'):
             count = current_pitcher_count(boxscore, side)
             if not count:
                 continue
             abbv = boxscore.get('teams', {}).get(side, {}).get('team', {}).get('abbreviation', '')
-            line = format_pitch_count_line(*count)
-            lines.append("{}: {}".format(abbv, line) if abbv else line)
-        if not lines:
+            name, balls, strikes, total = count
+            entries.append((abbv or side.title(), name, balls, strikes, total))
+        if not entries:
             await ctx.reply("No active pitchers right now.")
             return
-        await ctx.reply("```\n" + "\n".join(lines) + "\n```")
+        await ctx.reply(view=cards.pitchcount_card(entries))
 
     @app_commands.command(name='lineups',
                           description="Post both teams' starting lineups.")
@@ -416,11 +428,11 @@ class BaseballCog(commands.Cog):
             return
         await interaction.response.defer(thinking=True)
         game = await asyncio.to_thread(statsapi.get, 'game', {'gamePk': game_id})
-        msg = build_lineups_message(game)
-        if not msg:
+        view = cards.lineup_card(game)
+        if view is None:
             await interaction.followup.send("Lineups aren't available yet.")
             return
-        await interaction.followup.send(msg)
+        await interaction.followup.send(view=view)
 
     @commands.command()
     async def sync(self, ctx, guild_id: int = None):
@@ -444,16 +456,6 @@ class BaseballCog(commands.Cog):
     @commands.Cog.listener()
     async def on_ready(self):
         logger.info('Logged in as %s ||| %s', self.bot.user.name, self.bot.user.id)
-
-    @commands.Cog.listener()
-    async def on_raw_reaction_add(self, payload):
-        global msgid
-        if payload.message_id != msgid:
-            return
-        if payload.emoji.name == "1⃣":
-            counts[0] += 1
-        elif payload.emoji.name == "2⃣":
-            counts[1] += 1
 
 
 class AstrosBot(commands.Bot):
