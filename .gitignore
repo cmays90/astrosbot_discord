@@ -13,3 +13,6 @@ events.json
 threads.json
 
 *.doNotUpload.json
+
+# Captured game fixtures (regenerable via scripts/capture_game.py)
+fixtures/
