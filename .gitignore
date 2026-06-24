@@ -6,9 +6,11 @@ __pycache__/
 pyvenv.cfg
 *.tar.gz
 
-# Runtime state
-BaseballConsumer/logs/game_events.db
-BaseballConsumer/logs/game_thread.now
+# Runtime state — logs and databases
+BaseballConsumer/logs/
+*.log
+*.log.*
+*.db
 events.json
 threads.json
 
