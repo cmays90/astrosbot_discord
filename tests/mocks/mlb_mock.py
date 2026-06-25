@@ -85,7 +85,9 @@ class GameReplayer:
     _SCHEDULE_PASSTHROUGH = (
         'away_name', 'home_name', 'away_score', 'home_score',
         'winning_pitcher', 'losing_pitcher', 'save_pitcher',
-        'venue_name', 'series_status',
+        'venue_name', 'series_status', 'national_broadcasts',
+        'away_probable_pitcher', 'home_probable_pitcher',
+        'away_pitcher_note', 'home_pitcher_note',
     )
 
     def _schedule_item(self, status: str) -> list:
@@ -103,6 +105,13 @@ class GameReplayer:
         for k in self._SCHEDULE_PASSTHROUGH:
             if k in info:
                 item[k] = info[k]
+        # Fallback for fixtures captured before probables were passed through:
+        # surface the starters from the captured live feed.
+        probables = self.fixture.get('game_data', {}).get('gameData', {}).get('probablePitchers', {})
+        for side in ('away', 'home'):
+            key = '{}_probable_pitcher'.format(side)
+            if not item.get(key) and probables.get(side, {}).get('fullName'):
+                item[key] = probables[side]['fullName']
         return [item]
 
     # ------------------------------------------------------------------ #
@@ -119,6 +128,10 @@ class GameReplayer:
 
     def get(self, endpoint: str, params: Optional[dict] = None):
         """Returns a game snapshot with allPlays sliced up to current poll."""
+        if endpoint == 'schedule':
+            # The pregame card hydrates seriesStatus off the schedule endpoint.
+            series = self.fixture.get('series_status_obj') or {}
+            return {'dates': [{'games': [{'seriesStatus': series}]}]}
         if endpoint != 'game':
             return {}
         idx = self._in_progress_call_index()

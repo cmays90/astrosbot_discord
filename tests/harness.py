@@ -86,6 +86,7 @@ class Harness:
         meb.DISCORD_GAME_THREAD_CHANNEL_ID = self.discord.game_thread_channel_id
         meb.ANNOUNCEMENT_CHANNEL = self.discord.announcement_channel_id
         meb.DELETE_ANNOUNCEMENT = False
+        meb.OUR_TEAM_ID = 117
         meb.TEAMS_FILE = _TEAMS_FILE
         meb._init_tables()
 

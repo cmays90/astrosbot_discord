@@ -38,6 +38,7 @@ DISCORD_GUILD = None
 ANNOUNCEMENT_CHANNEL = None
 DELETE_ANNOUNCEMENT = False
 OWNER_ACCOUNT_ID = None
+OUR_TEAM_ID = None
 
 _LOG_FORMAT = '%(asctime)s %(levelname)s:%(name)s:%(message)s'
 _LOG_DIR = 'BaseballConsumer/logs'
@@ -138,7 +139,7 @@ def _migrate_json_to_db():
 def read_settings():
     global DB_FILE, DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, DISCORD_TOKEN
     global DISCORD_GAME_THREAD_CHANNEL_ID, DISCORD_GUILD, ANNOUNCEMENT_CHANNEL, DELETE_ANNOUNCEMENT
-    global OWNER_ACCOUNT_ID
+    global OWNER_ACCOUNT_ID, OUR_TEAM_ID
 
     errors = []
 
@@ -147,6 +148,7 @@ def read_settings():
         DB_FILE = game_settings.get('DB_FILE')
         if DB_FILE is None:
             errors.append("Missing DB_FILE")
+        OUR_TEAM_ID = game_settings.get('TEAM_ID')
 
     with open(DISCORD_SETTINGS_FILE) as f:
         settings = json.load(f)
@@ -196,6 +198,34 @@ async def my_background_task(_queue):
         await asyncio.sleep(3)
 
 
+async def _fetch_pregame_records(game_id):
+    """Fetch each team's season record for the pregame card. Returns
+    ``{'home': record, 'away': record}`` (each ``{wins, losses, divisionRank}``)
+    or ``None`` if the lookup fails, so the card still posts schedule-only."""
+    try:
+        data = await asyncio.to_thread(statsapi.get, 'game', {'gamePk': game_id})
+        teams = data['gameData']['teams']
+        return {side: teams.get(side, {}).get('record', {}) for side in ('home', 'away')}
+    except Exception:
+        logger.exception("Failed to fetch pregame records for game %s", game_id)
+        return None
+
+
+async def _fetch_series_status(game_id):
+    """Fetch the structured ``seriesStatus`` for the pregame card's series line.
+    Returns the dict (``gameNumber``, ``isTied``, ``wins``, ``losses``,
+    ``winningTeam``) or ``None`` on failure. The statsapi.schedule wrapper drops
+    this object, so we hit the schedule endpoint directly with the hydrate."""
+    try:
+        data = await asyncio.to_thread(
+            statsapi.get, 'schedule',
+            {'sportId': 1, 'gamePk': game_id, 'hydrate': 'seriesStatus'})
+        return data['dates'][0]['games'][0].get('seriesStatus')
+    except Exception:
+        logger.exception("Failed to fetch series status for game %s", game_id)
+        return None
+
+
 async def _close_thread_after_delay(thread, delay_seconds=1800):
     """Wait delay_seconds then archive and lock the game thread."""
     await asyncio.sleep(delay_seconds)
@@ -237,13 +267,11 @@ async def discord_poster(bot, _queue):
                     schedule = await asyncio.to_thread(statsapi.schedule, game_id=item['game_id'])
                     game = schedule[0]
                     start_time = datetime.datetime.strptime(game['game_datetime'], "%Y-%m-%dT%H:%M:%S%z")
-                    summary = (
-                        f"<t:{int(start_time.timestamp())}:t> | "
-                        f"{teams[str(game['away_id'])]['flair']} @ {teams[str(game['home_id'])]['flair']}"
-                        f"{ ' | Game ' + str(game['game_num']) if game['doubleheader'] != 'N' else '' }"
-                    )
+                    records = await _fetch_pregame_records(game['game_id'])
+                    series = await _fetch_series_status(game['game_id'])
                     channel = bot.get_channel(int(DISCORD_GAME_THREAD_CHANNEL_ID))
-                    msg = await channel.send(summary)
+                    msg = await channel.send(
+                        view=cards.pregame_card(game, OUR_TEAM_ID, records=records, series=series))
                     thread = await msg.create_thread(
                         name=(
                             f"⚾ | {teams[str(game['away_id'])]['short']} at {teams[str(game['home_id'])]['short']}"

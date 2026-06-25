@@ -82,22 +82,6 @@ Constants: `DIVISION_ID = 200` (AL West), `LEAGUE_ID = 103` (AL).
 
 ---
 
-## Features 6 + 8 — Pre-game post with series/season context
-
-**New helper** in `BaseballConsumerV2.py`:
-```
-build_pregame_message(game_data) -> discord.Embed
-```
-From `statsapi.get('game', ...)` `gameData`:
-- Probable pitchers — `probablePitchers.home/away` (id, name); season W-L/ERA via `statsapi.player_stat_data(pid, group='pitching', type='season')`.
-- Records — `teams.home/away.record` (`wins`, `losses`, `divisionRank`, `leagueRecord`) → season record + division standing.
-- Series context — `game.seriesGameNumber` / `game.gamesInSeries` ("Game 2 of 3"). Head-to-head series W-L is a **stretch** (derive from `statsapi.schedule` over the series dates) — leave a clearly-marked TODO if not done in pass 1.
-- Venue + weather — `venue.name`, `weather.condition/temp/wind`, start time as a Discord `<t:…>` timestamp.
-
-**Wiring** — add a block in `run()` mirroring the lineup-posting block (lines 178–198): dedup id `Pregame;<game_id>`, fire when `game_status in {'Pre-Game','Warmup','Warm Up'}` and not yet posted, fetch game data, build embed, enqueue, `_log_event`. (The minimal commented-out intent at lines 481–488 is replaced by this.)
-
----
-
 ## Feature 7 — Auto-react to Astros scoring plays
 
 **`discord_poster` change** (`MainEntryBot.py`, ~line 282) — capture the sent message and apply reactions:

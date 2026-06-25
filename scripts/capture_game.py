@@ -33,17 +33,30 @@ def build_fixture(game_pk, max_plays=None):
         'game_num': sched.get('game_num', 1),
         'doubleheader': sched.get('doubleheader', 'N'),
     }
-    # Pass through the fields the final card renders.
+    # Pass through the fields the final + pregame cards render.
     for k in ('away_name', 'home_name', 'away_score', 'home_score',
               'winning_pitcher', 'losing_pitcher', 'save_pitcher',
-              'venue_name', 'series_status'):
+              'venue_name', 'series_status', 'national_broadcasts',
+              'away_probable_pitcher', 'home_probable_pitcher',
+              'away_pitcher_note', 'home_pitcher_note'):
         if sched.get(k) not in (None, ''):
             info[k] = sched[k]
+
+    # Structured seriesStatus for the pregame card's series line. The statsapi
+    # schedule wrapper drops this object, so hit the schedule endpoint directly.
+    series_status_obj = None
+    try:
+        raw = statsapi.get('schedule',
+                           {'sportId': 1, 'gamePk': game_pk, 'hydrate': 'seriesStatus'})
+        series_status_obj = raw['dates'][0]['games'][0].get('seriesStatus')
+    except Exception:
+        pass
 
     return {
         'game_info': info,
         'plays': plays,
         'game_data': game,
+        'series_status_obj': series_status_obj,
         'linescore_string': statsapi.linescore(game_pk),
         'home_team': statsapi.lookup_team(sched['home_id'])[0],
         'away_team': statsapi.lookup_team(sched['away_id'])[0],
