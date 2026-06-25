@@ -265,6 +265,11 @@ class BaseballUpdaterBotV2:
                             pitching_side = 'away' if self.homeTeamBatting(info) else 'home'
                             info['pitcherCount'] = current_pitcher_count(boxscore, pitching_side)
 
+                            # Due-up for the team coming to bat (= the fielding
+                            # side of the half that just ended). Rides the
+                            # end-of-inning card built in build_event_items.
+                            info['dueUp'] = cards.due_up_rows(game_info, side=pitching_side)
+
                             # playType isn't working, do it yourself
                             info['playTypeActual'] = self.getPlayType(info['description'])
 

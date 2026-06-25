@@ -462,6 +462,24 @@ class BaseballCog(commands.Cog):
             return
         await interaction.followup.send(view=view)
 
+    @app_commands.command(name='due-up',
+                          description="Show the next three batters due up.")
+    async def due_up(self, interaction: discord.Interaction):
+        """Slash-only. Posts the next three batters for whoever is at bat in
+        this game thread."""
+        game_id = _db_get_game_by_thread(str(interaction.channel.id))
+        if game_id is None:
+            await interaction.response.send_message(
+                "This command is only available in a game thread.", ephemeral=True)
+            return
+        await interaction.response.defer(thinking=True)
+        game = await asyncio.to_thread(statsapi.get, 'game', {'gamePk': game_id})
+        view = cards.due_up_card(game)
+        if view is None:
+            await interaction.followup.send("Due-up isn't available yet.")
+            return
+        await interaction.followup.send(view=view)
+
     @commands.command()
     async def sync(self, ctx, guild_id: int = None):
         """Owner-only: (re)sync slash commands globally, or to one guild if given."""

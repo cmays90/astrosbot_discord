@@ -453,6 +453,11 @@ def end_of_inning_card(info):
                 "-# {} — {} pitches ({}-{})".format(pc[0], pc[3], pc[1], pc[2])
             )
         )
+    if info.get("dueUp"):
+        c.add_item(ui.Separator())
+        c.add_item(ui.TextDisplay("**Due up**"))
+        for section in _due_up_sections(info["dueUp"]):
+            c.add_item(section)
     c.add_item(ui.TextDisplay("-# Current delay: {}s".format(constants.DELAY)))
     return _layout(c)
 
@@ -510,6 +515,98 @@ def lineup_card(game_data):
         else:
             c.add_item(ui.TextDisplay(header))
         c.add_item(ui.TextDisplay(block))
+    return _layout(c)
+
+
+def _due_up_rows(game_data, side=None):
+    """The next three batters as (slot, name, pos) tuples, or None if the data
+    isn't available yet.
+
+    side=None -> read linescore.offense (batter/onDeck/inHole): exactly the
+        next three for whoever is at bat. Used by /due-up.
+    side in {'home','away'} -> compute from that team's battingOrder and how
+        many plate appearances it has completed. Used at end of inning, where
+        linescore.offense may still point at the side that just finished.
+    """
+    live = game_data.get("liveData", {})
+    teams = live.get("boxscore", {}).get("teams", {})
+
+    def position_of(pid):
+        for s in ("away", "home"):
+            p = teams.get(s, {}).get("players", {}).get("ID{}".format(pid))
+            if p:
+                return p.get("position", {}).get("abbreviation", "")
+        return ""
+
+    def slot_of(pid):
+        for s in ("away", "home"):
+            order = teams.get(s, {}).get("battingOrder") or []
+            if pid in order:
+                return order.index(pid) + 1
+        return None
+
+    if side is None:
+        offense = live.get("linescore", {}).get("offense", {})
+        people = [offense.get("batter"), offense.get("onDeck"), offense.get("inHole")]
+        if not all(people):
+            return None
+        return [
+            (slot_of(person.get("id")), person.get("fullName", "TBD"),
+             position_of(person.get("id")), person.get("id"))
+            for person in people
+        ]
+
+    order = teams.get(side, {}).get("battingOrder") or []
+    if len(order) < 9:
+        return None
+    plays = live.get("plays", {}).get("allPlays", []) or []
+    completed = sum(
+        1 for p in plays
+        if ("away" if p.get("about", {}).get("halfInning") == "top" else "home") == side
+        and "description" in p.get("result", {})
+    )
+    start = completed % 9
+    players = teams.get(side, {}).get("players", {})
+    rows = []
+    for k in range(3):
+        idx = (start + k) % 9
+        pid = order[idx]
+        p = players.get("ID{}".format(pid), {})
+        rows.append((idx + 1,
+                     p.get("person", {}).get("fullName", "TBD"),
+                     p.get("position", {}).get("abbreviation", ""),
+                     pid))
+    return rows
+
+
+def _due_up_sections(rows):
+    """One ui.Section per batter: ``#. Name Pos`` with a headshot thumbnail."""
+    sections = []
+    for slot, name, pos, pid in rows:
+        label = "`{}` **{}**".format(slot if slot else "-", name)
+        if pos:
+            label += "  {}".format(pos)
+        sections.append(
+            ui.Section(label, accessory=ui.Thumbnail(media=player_headshot_url(pid)))
+        )
+    return sections
+
+
+def due_up_rows(game_data, side=None):
+    """The next three batters as (slot, name, pos, person_id) tuples, or None.
+    Stashed on info['dueUp'] so the end-of-inning card can render headshots."""
+    return _due_up_rows(game_data, side)
+
+
+def due_up_card(game_data, side=None):
+    """`/due-up` view: the next three batters, or None if not available yet."""
+    rows = _due_up_rows(game_data, side)
+    if not rows:
+        return None
+    c = ui.Container(accent_colour=ASTROS_NAVY)
+    c.add_item(ui.TextDisplay("## Due up"))
+    for section in _due_up_sections(rows):
+        c.add_item(section)
     return _layout(c)
 
 
