@@ -270,6 +270,10 @@ class BaseballUpdaterBotV2:
                             # end-of-inning card built in build_event_items.
                             info['dueUp'] = cards.due_up_rows(game_info, side=pitching_side)
 
+                            # Batter now at the plate, shown on the at-bat card
+                            # for plays that don't end the inning.
+                            info['nowUp'] = cards.now_up_row(game_info)
+
                             # playType isn't working, do it yourself
                             info['playTypeActual'] = self.getPlayType(info['description'])
 

@@ -144,3 +144,51 @@ def test_end_of_inning_card_without_due_up():
             "pitcherCount": None}
     text = view_text(cards.end_of_inning_card(info))
     assert "Due up" not in text
+
+
+# --------------------------------------------------------------------------- #
+# "Now up" on the at-bat card
+# --------------------------------------------------------------------------- #
+
+
+def test_now_up_row_reads_offense_batter():
+    offense = {"batter": {"id": 4, "fullName": "Away4"}}
+    assert cards.now_up_row(_game(offense=offense)) == ("Away4", "1B", 4)
+
+
+def test_now_up_row_none_without_batter():
+    assert cards.now_up_row(_game()) is None
+
+
+def _atbat_info(outs, now_up):
+    return {
+        "event": "Single", "inningHalf": "top", "inning": "5",
+        "balls": "1", "strikes": "2", "outs": outs,
+        "description": "Player singles on a line drive.",
+        "funEmoji": "",
+        "manOnFirst": False, "manOnSecond": False, "manOnThird": False,
+        "awayTeamAbbv": "HOU", "homeTeamAbbv": "DET",
+        "awayStats_linescore": {"runs": 1, "hits": 4, "errors": 0},
+        "homeStats_linescore": {"runs": 0, "hits": 2, "errors": 1},
+        "batterId": 100,
+        "nowUp": now_up,
+    }
+
+
+def test_atbat_card_shows_now_up_mid_inning():
+    view = cards.atbat_card(_atbat_info("1", ("Away5", "DH", 5)))
+    text = view_text(view)
+    assert "Now up:" in text and "Away5" in text and "DH" in text
+    assert cards.player_headshot_url(5) in _thumbnail_urls(view)
+
+
+def test_atbat_card_hides_now_up_at_third_out():
+    view = cards.atbat_card(_atbat_info("3", ("Away5", "DH", 5)))
+    text = view_text(view)
+    assert "Now up" not in text
+
+
+def test_atbat_card_without_now_up_data():
+    info = _atbat_info("2", None)
+    text = view_text(cards.atbat_card(info))
+    assert "Now up" not in text

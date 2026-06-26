@@ -431,6 +431,17 @@ def atbat_card(info):
         )
     else:
         c.add_item(ui.TextDisplay(score))
+
+    # Who's at the plate now — skipped at the third out, where the
+    # end-of-inning card carries the due-up instead.
+    now_up = info.get("nowUp")
+    if now_up and outs != "3":
+        name, pos, pid = now_up
+        label = "**Now up:** {}{}".format(name, " {}".format(pos) if pos else "")
+        c.add_item(ui.Separator())
+        c.add_item(
+            ui.Section(label, accessory=ui.Thumbnail(media=player_headshot_url(pid)))
+        )
     return _layout(c)
 
 
@@ -518,6 +529,27 @@ def lineup_card(game_data):
     return _layout(c)
 
 
+def _player_position(teams, pid):
+    """Position abbreviation for a player id, looked up across both boxscores."""
+    for s in ("away", "home"):
+        p = teams.get(s, {}).get("players", {}).get("ID{}".format(pid))
+        if p:
+            return p.get("position", {}).get("abbreviation", "")
+    return ""
+
+
+def now_up_row(game_data):
+    """The batter currently at the plate as (name, pos, person_id), or None.
+    Stashed on info['nowUp'] so the at-bat card can show who's up next."""
+    live = game_data.get("liveData", {})
+    batter = live.get("linescore", {}).get("offense", {}).get("batter")
+    if not batter:
+        return None
+    pid = batter.get("id")
+    teams = live.get("boxscore", {}).get("teams", {})
+    return (batter.get("fullName", "TBD"), _player_position(teams, pid), pid)
+
+
 def _due_up_rows(game_data, side=None):
     """The next three batters as (slot, name, pos) tuples, or None if the data
     isn't available yet.
@@ -532,11 +564,7 @@ def _due_up_rows(game_data, side=None):
     teams = live.get("boxscore", {}).get("teams", {})
 
     def position_of(pid):
-        for s in ("away", "home"):
-            p = teams.get(s, {}).get("players", {}).get("ID{}".format(pid))
-            if p:
-                return p.get("position", {}).get("abbreviation", "")
-        return ""
+        return _player_position(teams, pid)
 
     def slot_of(pid):
         for s in ("away", "home"):
