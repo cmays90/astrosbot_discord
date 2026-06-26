@@ -432,10 +432,11 @@ def atbat_card(info):
     else:
         c.add_item(ui.TextDisplay(score))
 
-    # Who's at the plate now — skipped at the third out, where the
-    # end-of-inning card carries the due-up instead.
+    # Who's at the plate now — only when this play ended a plate appearance
+    # (not a challenge / timeout / other interruption), and skipped at the
+    # third out, where the end-of-inning card carries the due-up instead.
     now_up = info.get("nowUp")
-    if now_up and outs != "3":
+    if now_up and outs != "3" and info.get("endsPlateAppearance"):
         name, pos, pid = now_up
         label = "**Now up:** {}{}".format(name, " {}".format(pos) if pos else "")
         c.add_item(ui.Separator())

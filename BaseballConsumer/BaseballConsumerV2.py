@@ -277,6 +277,15 @@ class BaseballUpdaterBotV2:
                             # playType isn't working, do it yourself
                             info['playTypeActual'] = self.getPlayType(info['description'])
 
+                            # True only when this play actually ended a plate
+                            # appearance (a hit, out, walk, K, ...). Challenges,
+                            # timeouts, and other interruptions don't qualify, so
+                            # the at-bat card skips "Now up" for them.
+                            info['endsPlateAppearance'] = bool(
+                                play['about'].get('isComplete')
+                                and play['result'].get('type') == 'atBat'
+                            )
+
                             # Update strikeout tracker
                             if info['event'] == 'Strikeout':
                                 if self.homeTeamBatting(info):

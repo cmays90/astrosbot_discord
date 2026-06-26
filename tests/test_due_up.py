@@ -160,7 +160,7 @@ def test_now_up_row_none_without_batter():
     assert cards.now_up_row(_game()) is None
 
 
-def _atbat_info(outs, now_up):
+def _atbat_info(outs, now_up, ends_pa=True):
     return {
         "event": "Single", "inningHalf": "top", "inning": "5",
         "balls": "1", "strikes": "2", "outs": outs,
@@ -172,6 +172,7 @@ def _atbat_info(outs, now_up):
         "homeStats_linescore": {"runs": 0, "hits": 2, "errors": 1},
         "batterId": 100,
         "nowUp": now_up,
+        "endsPlateAppearance": ends_pa,
     }
 
 
@@ -190,5 +191,12 @@ def test_atbat_card_hides_now_up_at_third_out():
 
 def test_atbat_card_without_now_up_data():
     info = _atbat_info("2", None)
+    text = view_text(cards.atbat_card(info))
+    assert "Now up" not in text
+
+
+def test_atbat_card_hides_now_up_when_not_plate_appearance():
+    # A challenge / timeout / other interruption: don't show who's up next.
+    info = _atbat_info("1", ("Away5", "DH", 5), ends_pa=False)
     text = view_text(cards.atbat_card(info))
     assert "Now up" not in text
