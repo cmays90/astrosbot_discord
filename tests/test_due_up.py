@@ -3,6 +3,7 @@ Unit tests for the due-up feature: cards.due_up_rows / cards.due_up_card and
 their embedding (with headshots) in the end-of-inning card.
 """
 import cards
+from BaseballConsumerV2 import BaseballUpdaterBotV2
 from mocks.discord_mock import view_text
 
 
@@ -110,7 +111,7 @@ def test_side_path_none_without_full_order():
     assert cards.due_up_rows(g, side="away") is None
 
 
-def test_due_up_card_renders_with_headshots():
+def test_due_up_card_renders_compact_text_no_headshots():
     offense = {
         "batter": {"id": 1, "fullName": "Away1"},
         "onDeck": {"id": 2, "fullName": "Away2"},
@@ -119,13 +120,13 @@ def test_due_up_card_renders_with_headshots():
     view = cards.due_up_card(_game(offense=offense))
     text = view_text(view)
     assert "Due up" in text
-    assert "**Away1**" in text and "CF" in text
-    # Each batter carries a headshot thumbnail keyed by their person id.
-    urls = _thumbnail_urls(view)
-    assert all(cards.player_headshot_url(pid) in urls for pid in (1, 2, 3))
+    assert "1. Away1 CF" in text
+    assert "2. Away2 SS" in text
+    # No headshots — that's the whole point of the compact block.
+    assert _thumbnail_urls(view) == []
 
 
-def test_end_of_inning_card_embeds_due_up_with_headshot():
+def test_end_of_inning_card_embeds_due_up_block():
     info = {
         "inningHalf": "top", "inning": "5",
         "fullLinescoreString": "linescore",
@@ -135,8 +136,8 @@ def test_end_of_inning_card_embeds_due_up_with_headshot():
     view = cards.end_of_inning_card(info)
     text = view_text(view)
     assert "Due up" in text
-    assert "**Home1**" in text
-    assert cards.player_headshot_url(11) in _thumbnail_urls(view)
+    assert "1. Home1 RF" in text
+    assert _thumbnail_urls(view) == []
 
 
 def test_end_of_inning_card_without_due_up():
@@ -200,3 +201,22 @@ def test_atbat_card_hides_now_up_when_not_plate_appearance():
     info = _atbat_info("1", ("Away5", "DH", 5), ends_pa=False)
     text = view_text(cards.atbat_card(info))
     assert "Now up" not in text
+
+
+# --------------------------------------------------------------------------- #
+# Game-over suppression of due-up
+# --------------------------------------------------------------------------- #
+
+
+def _status(coded):
+    return {"gameData": {"status": {"codedGameState": coded}}}
+
+
+def test_game_is_over_detects_game_over_and_final():
+    assert BaseballUpdaterBotV2.game_is_over(_status("O"))  # Game Over
+    assert BaseballUpdaterBotV2.game_is_over(_status("F"))  # Final
+
+
+def test_game_is_over_false_in_progress_or_missing():
+    assert not BaseballUpdaterBotV2.game_is_over(_status("I"))  # In Progress
+    assert not BaseballUpdaterBotV2.game_is_over({})

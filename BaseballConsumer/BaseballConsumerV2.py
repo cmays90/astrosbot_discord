@@ -268,7 +268,11 @@ class BaseballUpdaterBotV2:
                             # Due-up for the team coming to bat (= the fielding
                             # side of the half that just ended). Rides the
                             # end-of-inning card built in build_event_items.
-                            info['dueUp'] = cards.due_up_rows(game_info, side=pitching_side)
+                            # Suppressed once the game is over — no one bats next.
+                            info['dueUp'] = (
+                                None if self.game_is_over(game_info)
+                                else cards.due_up_rows(game_info, side=pitching_side)
+                            )
 
                             # Batter now at the plate, shown on the at-bat card
                             # for plays that don't end the inning.
@@ -529,6 +533,14 @@ class BaseballUpdaterBotV2:
 
     def homeTeamBatting(self, info):
         return info['inningHalf'].upper()[0:3] == "BOT"
+
+    @staticmethod
+    def game_is_over(game_info):
+        """True once the final out has landed (Game Over or Final). Walk-offs
+        and extra-inning endings don't fall on a fixed inning, so we read the
+        game's coded state rather than guessing from the inning number."""
+        state = game_info.get('gameData', {}).get('status', {}).get('codedGameState')
+        return state in ('O', 'F')
 
     def funEmoji(self, info):
         logger.info(info)

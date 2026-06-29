@@ -468,8 +468,7 @@ def end_of_inning_card(info):
     if info.get("dueUp"):
         c.add_item(ui.Separator())
         c.add_item(ui.TextDisplay("**Due up**"))
-        for section in _due_up_sections(info["dueUp"]):
-            c.add_item(section)
+        c.add_item(ui.TextDisplay(_due_up_block(info["dueUp"])))
     c.add_item(ui.TextDisplay("-# Current delay: {}s".format(constants.DELAY)))
     return _layout(c)
 
@@ -608,22 +607,20 @@ def _due_up_rows(game_data, side=None):
     return rows
 
 
-def _due_up_sections(rows):
-    """One ui.Section per batter: ``#. Name Pos`` with a headshot thumbnail."""
-    sections = []
-    for slot, name, pos, pid in rows:
-        label = "`{}` **{}**".format(slot if slot else "-", name)
-        if pos:
-            label += "  {}".format(pos)
-        sections.append(
-            ui.Section(label, accessory=ui.Thumbnail(media=player_headshot_url(pid)))
-        )
-    return sections
+def _due_up_block(rows):
+    """Fenced ``#. Name Pos`` block, mirroring lineup_card's row style. Kept
+    compact (no headshots) so the end-of-inning post stays small."""
+    width = max(len(name) for _, name, _, _ in rows)
+    lines = "\n".join(
+        "{}. {:<{w}} {}".format(slot if slot else "-", name, pos, w=width).rstrip()
+        for (slot, name, pos, _pid) in rows
+    )
+    return "```\n{}\n```".format(lines)
 
 
 def due_up_rows(game_data, side=None):
     """The next three batters as (slot, name, pos, person_id) tuples, or None.
-    Stashed on info['dueUp'] so the end-of-inning card can render headshots."""
+    Stashed on info['dueUp'] so the end-of-inning card can render the block."""
     return _due_up_rows(game_data, side)
 
 
@@ -634,8 +631,7 @@ def due_up_card(game_data, side=None):
         return None
     c = ui.Container(accent_colour=ASTROS_NAVY)
     c.add_item(ui.TextDisplay("## Due up"))
-    for section in _due_up_sections(rows):
-        c.add_item(section)
+    c.add_item(ui.TextDisplay(_due_up_block(rows)))
     return _layout(c)
 
 
