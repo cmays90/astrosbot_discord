@@ -211,19 +211,110 @@ async def _fetch_pregame_records(game_id):
         return None
 
 
-async def _fetch_series_status(game_id):
-    """Fetch the structured ``seriesStatus`` for the pregame card's series line.
-    Returns the dict (``gameNumber``, ``isTied``, ``wins``, ``losses``,
-    ``winningTeam``) or ``None`` on failure. The statsapi.schedule wrapper drops
-    this object, so we hit the schedule endpoint directly with the hydrate."""
+async def _fetch_probable_pitcher_stats(game_id):
+    """Fetch handedness + season W-L/ERA/GS for each side's probable starter,
+    for the pregame card. Returns ``{'home': stats, 'away': stats}`` (each
+    ``{}`` if that side has no starter set yet), or ``None`` on failure."""
+    try:
+        data = await asyncio.to_thread(statsapi.get, 'game', {'gamePk': game_id})
+        probables = data['gameData'].get('probablePitchers', {})
+    except Exception:
+        logger.exception("Failed to fetch probable pitchers for game %s", game_id)
+        return None
+
+    result = {}
+    for side in ('home', 'away'):
+        person_id = probables.get(side, {}).get('id')
+        result[side] = await _fetch_pitcher_stats(person_id) if person_id else {}
+    return result
+
+
+async def _fetch_pitcher_stats(person_id):
+    """Handedness + current-season pitching line (W-L, ERA, GS) for one
+    pitcher. Returns ``{}`` if the lookup fails or the pitcher has no stats
+    yet (e.g. a rookie making their debut)."""
+    try:
+        data = await asyncio.to_thread(
+            statsapi.get, 'person',
+            {'personId': person_id, 'hydrate': 'stats(group=[pitching],type=[season])'})
+        person = data['people'][0]
+        splits = (person.get('stats') or [{}])[0].get('splits') or []
+        stat = splits[0]['stat'] if splits else {}
+        return {
+            'hand': person.get('pitchHand', {}).get('code'),
+            'wins': stat.get('wins'),
+            'losses': stat.get('losses'),
+            'era': stat.get('era'),
+            'games_started': stat.get('gamesStarted'),
+        }
+    except Exception:
+        logger.exception("Failed to fetch pitcher stats for person %s", person_id)
+        return {}
+
+
+async def _fetch_series_status(game):
+    """Resolve the series standing *entering* ``game`` for the pregame card.
+
+    statsapi's ``seriesStatus`` lives on the game it describes and is only
+    populated once that game is final — an upcoming game's own entry always
+    reads 0-0/tied. So to show where the series stands going in, we read the
+    **previous** game's (now final) ``seriesStatus``.
+
+    Returns ``{"firstGame": True}`` for game 1, the previous game's
+    ``seriesStatus`` dict otherwise, or ``None`` when there's nothing reliable
+    to show (so the card simply omits the line). The statsapi.schedule wrapper
+    drops ``seriesStatus``, so we hit the schedule endpoint with the hydrate."""
+    game_id = game['game_id']
     try:
         data = await asyncio.to_thread(
             statsapi.get, 'schedule',
             {'sportId': 1, 'gamePk': game_id, 'hydrate': 'seriesStatus'})
-        return data['dates'][0]['games'][0].get('seriesStatus')
+        upcoming = data['dates'][0]['games'][0].get('seriesStatus') or {}
     except Exception:
         logger.exception("Failed to fetch series status for game %s", game_id)
         return None
+
+    game_number = upcoming.get('gameNumber')
+    if game_number is None:
+        return None
+    if game_number == 1:
+        return {'firstGame': True}
+    return await _fetch_prior_series_status(game, game_number, upcoming.get('totalGames'))
+
+
+async def _fetch_prior_series_status(game, game_number, total_games):
+    """Return the final ``seriesStatus`` of the game before ``game`` in the same
+    series (one ``gameNumber`` lower, matching ``totalGames``), or ``None``."""
+    team_id = game.get('home_id') or game.get('away_id')
+    try:
+        end = datetime.datetime.strptime(game['game_date'], "%Y-%m-%d").date()
+    except (KeyError, ValueError):
+        return None
+    start = end - datetime.timedelta(days=5)
+    try:
+        data = await asyncio.to_thread(
+            statsapi.get, 'schedule',
+            {'sportId': 1, 'teamId': team_id,
+             'startDate': start.isoformat(), 'endDate': end.isoformat(),
+             'hydrate': 'seriesStatus'})
+    except Exception:
+        logger.exception("Failed to fetch prior series status for game %s", game['game_id'])
+        return None
+
+    # Scan oldest→newest and keep the most recent match, so back-to-back series
+    # that happen to share a gameNumber/totalGames resolve to the current one.
+    prior = None
+    for date in data.get('dates', []):
+        for g in date.get('games', []):
+            ss = g.get('seriesStatus') or {}
+            if g.get('status', {}).get('detailedState') != 'Final':
+                continue
+            if ss.get('gameNumber') != game_number - 1:
+                continue
+            if total_games is not None and ss.get('totalGames') != total_games:
+                continue
+            prior = ss
+    return prior
 
 
 async def _close_thread_after_delay(thread, delay_seconds=1800):
@@ -268,10 +359,13 @@ async def discord_poster(bot, _queue):
                     game = schedule[0]
                     start_time = datetime.datetime.strptime(game['game_datetime'], "%Y-%m-%dT%H:%M:%S%z")
                     records = await _fetch_pregame_records(game['game_id'])
-                    series = await _fetch_series_status(game['game_id'])
+                    series = await _fetch_series_status(game)
+                    pitcher_stats = await _fetch_probable_pitcher_stats(game['game_id'])
                     channel = bot.get_channel(int(DISCORD_GAME_THREAD_CHANNEL_ID))
                     msg = await channel.send(
-                        view=cards.pregame_card(game, OUR_TEAM_ID, records=records, series=series))
+                        view=cards.pregame_card(
+                            game, OUR_TEAM_ID, records=records, series=series,
+                            pitcher_stats=pitcher_stats))
                     thread = await msg.create_thread(
                         name=(
                             f"⚾ | {teams[str(game['away_id'])]['short']} at {teams[str(game['home_id'])]['short']}"

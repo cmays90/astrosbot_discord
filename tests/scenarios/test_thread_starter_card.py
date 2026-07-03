@@ -43,9 +43,7 @@ class ThreadStarterReplayer:
             'game_num': 1,
             'doubleheader': 'N',
             'away_probable_pitcher': 'Framber Valdez',
-            'away_pitcher_note': '7-4, 2.91 ERA',
             'home_probable_pitcher': 'Tarik Skubal',
-            'home_pitcher_note': '9-2, 2.15 ERA',
             'venue_name': 'Comerica Park',
             'national_broadcasts': ['ESPN'],
             'series_status': 'Game 2 of 3',
@@ -60,11 +58,24 @@ class ThreadStarterReplayer:
 
     def get(self, endpoint, params=None):
         if endpoint == 'schedule':
-            # seriesStatus lookup for the pregame card's series line.
-            return {'dates': [{'games': [{'seriesStatus': {
-                'gameNumber': 2, 'wins': 1, 'losses': 0, 'isTied': False,
-                'winningTeam': {'id': ASTROS},
-            }}]}]}
+            params = params or {}
+            if 'gamePk' in params:
+                # The upcoming (game 2) entry — only gameNumber/totalGames matter;
+                # its own wins/losses are always 0-0 until it's played.
+                return {'dates': [{'games': [{'seriesStatus': {
+                    'gameNumber': 2, 'totalGames': 3, 'isTied': True,
+                    'wins': 0, 'losses': 0,
+                }}]}]}
+            # The previous-game lookup (teamId + date range): game 1 is final and
+            # carries the standing the card shows — Astros lead 1-0.
+            return {'dates': [{'games': [{
+                'status': {'detailedState': 'Final'},
+                'seriesStatus': {
+                    'gameNumber': 1, 'totalGames': 3, 'isTied': False,
+                    'wins': 1, 'losses': 0, 'winningTeam': {'id': ASTROS},
+                    'result': 'HOU leads 1-0',
+                },
+            }]}]}
         # Records lookup ('game' endpoint) for the pregame card.
         return {'gameData': {'teams': {
             'away': {'record': {'wins': 45, 'losses': 32, 'divisionRank': '1'}},

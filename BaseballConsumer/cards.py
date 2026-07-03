@@ -167,39 +167,81 @@ def _record_blurb(rec):
     return "{}-{}{}".format(wins, losses, " ({})".format(rank) if rank else "")
 
 
-def _probable_line(flair, name, note):
-    """`<:HOU:> Framber Valdez (7-4, 2.91 ERA)`, or None when no starter set."""
+_HAND_LABELS = {"R": "RHP", "L": "LHP"}
+
+
+def _pitcher_stat_note(stats):
+    """`RHP, 7-4, 2.91 ERA, 15 GS` from a pitcher stat dict, or '' if empty.
+
+    ``stats`` holds whichever of ``hand``/``wins``/``losses``/``era``/
+    ``games_started`` were resolved; any may be missing.
+    """
+    if not stats:
+        return ""
+    parts = []
+    hand = stats.get("hand")
+    if hand:
+        parts.append(_HAND_LABELS.get(hand, hand))
+    wins, losses = stats.get("wins"), stats.get("losses")
+    if wins is not None and losses is not None:
+        parts.append("{}-{}".format(wins, losses))
+    era = stats.get("era")
+    if era is not None:
+        parts.append("{} ERA".format(era))
+    gs = stats.get("games_started")
+    if gs is not None:
+        parts.append("{} GS".format(gs))
+    return ", ".join(parts)
+
+
+def _probable_line(flair, name, stats):
+    """`<:HOU:> Framber Valdez (LHP, 7-4, 2.91 ERA, 15 GS)`, or None when no
+    starter set. ``stats`` is a per-pitcher dict, see ``_pitcher_stat_note``."""
     name = (name or "").strip()
     if not name or name.upper() == "TBD":
         return None
     line = "{} {}".format(flair, name).strip()
-    note = (note or "").strip()
+    note = _pitcher_stat_note(stats)
     if note:
         line = "{} ({})".format(line, note)
     return line
 
 
 def format_series(series_status):
-    """Friendly series-standing line from a statsapi ``seriesStatus`` dict.
+    """Friendly series-standing line for the pregame card.
 
     Returns one of: ``"First game of series"``, ``"Series tied X-X"``, or
     ``"<:leader_flair:> up X-Y"`` — or ``None`` if there's nothing to show.
-    Reflects the standing *entering* the game (built pre-game in practice).
+
+    ``series_status`` is the standing *entering* the upcoming game, which
+    ``_fetch_series_status`` derives from the **previous** game's statsapi
+    ``seriesStatus`` (the upcoming game's own entry is always 0-0/tied until it
+    is played). It is either the ``{"firstGame": True}`` marker or a played
+    game's ``seriesStatus`` dict (``wins``/``losses``/``isTied``/``winningTeam``/
+    ``result``). ``wins``/``losses`` are leader-relative (``wins`` ≥ ``losses``).
     """
     if not series_status:
         return None
-    if series_status.get("gameNumber") == 1:
+    if series_status.get("firstGame"):
         return "First game of series"
     wins = series_status.get("wins") or 0
     losses = series_status.get("losses") or 0
+    if series_status.get("isTied") or wins == losses:
+        if wins == 0:
+            # A played game can't leave the series 0-0; treat it as missing
+            # data and omit the line rather than assert a bogus "tied 0-0".
+            return None
+        return "Series tied {0}-{0}".format(wins)
     leader = (series_status.get("winningTeam") or {}).get("id")
-    if leader is not None and wins != losses:
-        flair = team_flair(leader)
-        return "{} up {}-{}".format(flair, max(wins, losses), min(wins, losses)).strip()
-    return "Series tied {0}-{0}".format(max(wins, losses))
+    flair = team_flair(leader) if leader is not None else ""
+    if flair:
+        return "{} up {}-{}".format(flair, max(wins, losses), min(wins, losses))
+    # No flair to render — fall back to the API's ready-made phrasing,
+    # e.g. "MIN leads 1-0" / "HOU wins 3-1".
+    return series_status.get("result")
 
 
-def pregame_card(game, our_team_id=None, records=None, series=None):
+def pregame_card(game, our_team_id=None, records=None, series=None, pitcher_stats=None):
     """Marquee start-of-day card used as the game thread's starter message.
 
     Driven off the ``statsapi.schedule`` dict; ``records`` (optional) is
@@ -207,7 +249,9 @@ def pregame_card(game, our_team_id=None, records=None, series=None):
     ``series`` (optional) is a statsapi ``seriesStatus`` dict for the friendly
     series line (falls back to the raw ``series_status`` string). The opponent
     (non-``our_team_id`` side) drives the logo and accent so each matchup card
-    is visually distinct.
+    is visually distinct. ``pitcher_stats`` (optional) is ``{'home': {...},
+    'away': {...}}`` of ``hand``/``wins``/``losses``/``era``/``games_started``
+    for each side's probable starter, shown alongside their name.
     """
     home_id = game.get("home_id")
     away_id = game.get("away_id")
@@ -249,16 +293,17 @@ def pregame_card(game, our_team_id=None, records=None, series=None):
         c.add_item(ui.TextDisplay(heading))
 
     # Probable pitchers.
+    pitcher_stats = pitcher_stats or {}
     probables = [
         _probable_line(
             team_flair(away_id),
             game.get("away_probable_pitcher"),
-            game.get("away_pitcher_note"),
+            pitcher_stats.get("away"),
         ),
         _probable_line(
             team_flair(home_id),
             game.get("home_probable_pitcher"),
-            game.get("home_pitcher_note"),
+            pitcher_stats.get("home"),
         ),
     ]
     probables = [p for p in probables if p]

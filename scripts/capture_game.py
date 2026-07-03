@@ -37,8 +37,7 @@ def build_fixture(game_pk, max_plays=None):
     for k in ('away_name', 'home_name', 'away_score', 'home_score',
               'winning_pitcher', 'losing_pitcher', 'save_pitcher',
               'venue_name', 'series_status', 'national_broadcasts',
-              'away_probable_pitcher', 'home_probable_pitcher',
-              'away_pitcher_note', 'home_pitcher_note'):
+              'away_probable_pitcher', 'home_probable_pitcher'):
         if sched.get(k) not in (None, ''):
             info[k] = sched[k]
 

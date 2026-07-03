@@ -87,7 +87,6 @@ class GameReplayer:
         'winning_pitcher', 'losing_pitcher', 'save_pitcher',
         'venue_name', 'series_status', 'national_broadcasts',
         'away_probable_pitcher', 'home_probable_pitcher',
-        'away_pitcher_note', 'home_pitcher_note',
     )
 
     def _schedule_item(self, status: str) -> list:
